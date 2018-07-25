@@ -7,8 +7,7 @@ import datetime as now
 import json
 import sys
 
-''' Add the path to your NetCDF_Test file directory below. The last two items
-    will remain the same '''
+''' Add your mce file path below '''
 #--------------------------------------------------------------#
 path = '/Users/vlb9398/Dropbox/NetCDF_Test/VLB'
 sys.path.append(path)
