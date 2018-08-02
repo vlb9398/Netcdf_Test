@@ -1,85 +1,87 @@
-from netCDF4 import Dataset
-from netCDF4 import MFDataset
+import numpy as np
+from os import stat
 import os
 import sys
-import takedata_test as td
+import mce_data
+import subprocess
 import settings as st
-import datetime as now
-from netCDF4 import num2date, date2num
+import netcdf_trial as nc
 
-#from multipagegui import parameters
 
-def new_file(n):
-    mce = Dataset("gui_data_test{n}.nc".format(n=st.n),"w",format="NETCDF4")
+def netcdfdata(n_files):
+    tempfiledir = ('./netcdffiles')
+    if os.path.exists(tempfiledir):
+        print('Hello!')
+    else:
+        print('Making NETCDF File Directory')
+        netcdf_dir = ['mkdir netcdffiles']
+        subprocess.Popen(netcdf_dir, shell=True).wait()
+    #print('HELLO!')
+    #n_files = len(os.listdir("/data/cryo/current_data"))
+    a = 0
+    st.a = a
+    mce = 1
+    n = 0
+    while True:
+        mce_file = os.path.exists("/data/cryo/current_data/temp.%0.3i" %(a+1)) #wait to read new file until old file is complete
+        if mce_file:
+            print(a)
+            mce_file_name = "/data/cryo/current_data/temp.%0.3i" %(a)
+            a = a + 1
+            st.a = a
+            f = mce_data.SmallMCEFile(mce_file_name)
+            header = read_header(f)
+            mce, n = readdata(f, mce_file_name, mce, header, n, a)
+            mce_file = os.path.exists("/data/cryo/current_data/temp.%0.3i" %(a+1))
+        else:
+            pass
 
-    # create the gui parameters group
-    guiparams = mce.createGroup('guiparams')
-    stream = mce.createGroup('stream')
-    heatmap = mce.createGroup('heatmap')
-    mce_header = mce.createGroup('mce_header')
 
-    # GUI PARAMETERS ---------------------------------------------------------------------------------
-    guiparams.createDimension('det',1)
-    guiparams.createDimension('obs',1)
-    guiparams.createDimension('date',1)
-    guiparams.createDimension('f',1)
-    guiparams.createDimension('mode',1)
-    guiparams.createDimension('r',1)
-    guiparams.createDimension('t',None)
-    # Dimensions for Data Arrays -------------------------------------------------------------------
-    stream.createDimension('raw_rows',41)
-    stream.createDimension('raw_cols',8)
-    stream.createDimension('raw_cols_all',32)
-    stream.createDimension('raw_num',st.h_size)
-    stream.createDimension('t',None)
+def readdata(f, mce_file_name, mce, head, n, a):
+    h = f.Read(row_col=True, unfilter='DC').data
+    d = np.empty([h.shape[0],h.shape[1]],dtype=float)
+    for b in range(h.shape[0]):
+        for c in range(h.shape[1]):
+            d[b][c] = (np.std(h[b][c][:],dtype=float))
 
-    heatmap.createDimension('rms_rows',41)
-    heatmap.createDimension('rms_cols',8)
-    heatmap.createDimension('rms_cols_all',32)
-    heatmap.createDimension('t',None)
+    tempfiledir = ('netcdffiles')
+    if a == 1:
+    	mce = nc.new_file(n, h.shape, head)
+    if os.stat(tempfiledir + "/gui_data_test{n}.nc".format(n=n)).st_size < 20 * 10**6: # of bytes here
+        nc.data(h,d,n,a,head)
+    else:
+        mce.close()
+        n = n + 1
+        #mce = 'tempfiles/gui_data_test%s.nc' % (n - 1)
+        print('----------New File----------')
+        mce = nc.new_file(n, h.shape, head)
+        nc.data(h,d,n,a,head)
 
-    mce_header.createDimension('k',2)
-    mce_header.createDimension('v',16)
-    mce_header.createDimension('t',None)
+    delete_file = ['rm %s' % (mce_file_name)]
+    subprocess.Popen(delete_file, shell=True)
+    return mce, n
 
-    # creating variables --------------------------------------------------------------------------------
-    Observer = guiparams.createVariable("observer","S3","obs")
-    Datetime = guiparams.createVariable('datetime', 'S8','date')
-    Frames = guiparams.createVariable('frames', 'S3','f')
-    Datamode = guiparams.createVariable('datamode','S2','mode')
-    Detector = guiparams.createVariable('detector','f8','det')
-    Rc = guiparams.createVariable('rc','S1','r') # can either use rc name or integer used by gui
-    global Time
-    Time = guiparams.createVariable('time','S26','t')
 
-    global Rms_Noise_All
-    global Rms_Noise
-    Rms_Noise_All = heatmap.createVariable('rms_noise_all','f8',('t','rms_rows','rms_cols_all'))
-    Rms_Noise = heatmap.createVariable('rms_noise','f8',('t','rms_rows','rms_cols'))
+def read_header(f):
+    keys = []
+    values = []
+    for key,value in f.header.items():
+        if key == '_rc_present':
+            for i in range(len(value)):
+                if value[i] == True:
+                    value[i] = "1"
+                elif value[i] == False:
+                    value[i] = "0"
+                else:
+                    print("I don't know what I am...")
+            value = ''.join(map(str,value))
+        value = str(value)
+        keys.append(key)
+        values.append(value)
+    keys = np.asarray(keys,dtype=object)
+    values = np.asarray(values,dtype=object)
+    head = np.array((keys,values)).T
+    return head
 
-    global Raw_Data_All
-    global Raw_Data
-    Raw_Data = stream.createVariable('raw_data','f8',('t','raw_rows','raw_cols','raw_num'))
-    Raw_Data_All = stream.createVariable('raw_data_all','f8',('t','raw_rows','raw_cols_all','raw_num'))
-
-    global Header
-    Header = mce_header.createVariable('header','S3',('t','v','k'))
-
-    # appending to variables w/ gui params ------------------------------------------------------------
-    Observer[0] = 'VLB' #str(parameters[0])
-    Frames[0] = '100' #str(parameters[3])
-    Datetime[0] = '00:00:00' #str(parameters[4]
-    Datamode[0] = str(10) #str(parameters[1])
-    Rc[0] = str(2) #str(parameters[2])
-
-def data_all(h,d,n,a):
-    Time[0] = str(now.datetime.utcnow())
-    Rms_Noise_All[0,:,:] = d # can use datetime from gui...
-    Raw_Data_All[0,:,:,:] = h
-    Header[0,:,:] = st.head
-
-def data(h,d,n,a):
-    Time[0] = str(now.datetime.utcnow())
-    Rms_Noise[0,:,:] = d
-    Raw_Data[0,:,:,:] = h
-    Header[0,:,:] = st.head
+if __name__ == '__main__':
+    netcdfdata(sys.argv[1])
